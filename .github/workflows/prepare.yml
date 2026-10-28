@@ -1,0 +1,174 @@
+# 1) Manual run: prepares one Reel for a chosen day (a queue keyed by date).
+#    The package is stored as the artifact "reel-YYYY-MM-DD" and publish.yml
+#    publishes it on exactly that day at PUBLISH_TIME. At most one Reel per day.
+name: 1 · Schedule a Reel from a YouTube Short
+# The control panel parses the date and video ID from the run name, keep this format.
+run-name: "📅 ${{ inputs.publish_date }} · ${{ inputs.video_id || 'latest Short' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_date:
+        description: "Publish day, YYYY-MM-DD (or 'tomorrow')"
+        required: true
+      video_id:
+        description: "YouTube Short ID or URL (empty = latest Short)"
+        required: false
+        default: ""
+      replace:
+        description: "Replace the Reel already scheduled for this day"
+        type: boolean
+        default: false
+      ai_label:
+        description: "Instagram 'AI info' label for this Reel: on / off (empty = AI_LABEL setting)"
+        required: false
+        default: ""
+      video_upload:
+        description: "Branch with the video file attached in the panel (empty = download from YouTube)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write  # delete the temporary branch with the attached video
+  actions: write  # queue overview + delete a replaced package
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+      TIMEZONE: ${{ vars.TIMEZONE || 'UTC' }}
+      PUBLISH_TIME: ${{ vars.PUBLISH_TIME }}
+      COVER_MODE: ${{ vars.COVER_MODE }}
+      COMMENT_MODE: ${{ vars.COMMENT_MODE }}
+      COMMENT_TEMPLATE: ${{ vars.COMMENT_TEMPLATE }}
+      AI_LABEL: ${{ vars.AI_LABEL }}
+      YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+      YTDLP_PROXY: ${{ secrets.YTDLP_PROXY }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # yt-dlp needs a JavaScript runtime for YouTube (stream signature solving)
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Cookies for yt-dlp (optional)
+        if: env.YTDLP_COOKIES != ''
+        run: |
+          printf '%s\n' "$YTDLP_COOKIES" > "$RUNNER_TEMP/cookies.txt"
+          echo "YTDLP_COOKIES_FILE=$RUNNER_TEMP/cookies.txt" >> "$GITHUB_ENV"
+
+      # The panel puts an attached video on a temporary branch "upload/…" (one file, no history).
+      - name: Fetch the attached video
+        id: upload
+        if: inputs.video_upload != ''
+        env:
+          REF: ${{ inputs.video_upload }}
+        run: |
+          set -euo pipefail
+          # The branch name contains "/", so pass it URL-encoded as ?ref= (never inside the URL path).
+          REF_Q=$(jq -rn --arg r "$REF" '$r|@uri')
+          NAME=$(gh api "repos/$GH_REPO/contents?ref=$REF_Q" --jq '[.[] | select(.type == "file")][0].name')
+          [ -n "$NAME" ] || { echo "::error::The attached video wasn't found on branch $REF."; exit 1; }
+          FILE="$RUNNER_TEMP/$NAME"
+          # Binary download with curl: `gh api` treats the body as text and fails ("transform: short source buffer").
+          curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw+json"                -o "$FILE" "https://api.github.com/repos/$GH_REPO/contents/$NAME?ref=$REF_Q"
+          [ -s "$FILE" ] || { echo "::error::Downloading the attached video failed."; exit 1; }
+          echo "📎 Attached video: $NAME ($(du -h "$FILE" | cut -f1))"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare package
+        id: prepare
+        env:
+          PUBLISH_DATE: ${{ inputs.publish_date }}
+          VIDEO_ID: ${{ inputs.video_id }}
+          VIDEO_FILE_IN: ${{ steps.upload.outputs.file }}
+          AI_LABEL_INPUT: ${{ inputs.ai_label }}
+        run: |
+          ARGS=(--publish-date "$PUBLISH_DATE")
+          if [ -n "$VIDEO_ID" ]; then ARGS+=(--video-id "$VIDEO_ID"); fi
+          case "$AI_LABEL_INPUT" in on|off) ARGS+=(--ai-label "$AI_LABEL_INPUT");; esac
+          if [ -n "$VIDEO_FILE_IN" ]; then ARGS+=(--video-file "$VIDEO_FILE_IN"); fi
+          python main.py prepare "${ARGS[@]}"
+
+      - name: Check the day is free
+        env:
+          DAY: ${{ steps.prepare.outputs.publish_date }}
+          VID: ${{ steps.prepare.outputs.video_id }}
+          REPLACE: ${{ inputs.replace }}
+        run: |
+          # The same Short must not wait in the queue for another (upcoming) day.
+          TODAY=$(TZ="$TIMEZONE" date +%F)
+          # Only the newest package of each day counts (a replaced one may still exist until it's cleaned up).
+          for RUN in $(gh api "repos/$GH_REPO/actions/artifacts?per_page=100" --paginate \
+                         | jq -rs --arg day "reel-$DAY" --arg today "reel-$TODAY" \
+                           '[.[].artifacts[] | select(.expired == false and (.name | startswith("reel-")) and .name != $day and .name >= $today)] | group_by(.name) | map(max_by(.created_at).workflow_run.id) | .[]'); do
+            TITLE=$(gh api "repos/$GH_REPO/actions/runs/$RUN" --jq .display_title)
+            case "$TITLE" in *"$VID"*)
+              echo "::error::This Short is already scheduled for another day ($TITLE). Cancel that one first."
+              exit 1;;
+            esac
+          done
+
+          COUNT=$(gh api "repos/$GH_REPO/actions/artifacts?name=reel-$DAY" \
+                  --jq '[.artifacts[] | select(.expired == false)] | length')
+          if [ "$COUNT" -gt 0 ] && [ "$REPLACE" != "true" ]; then
+            echo "::error::Another Reel is already scheduled for $DAY. Pick a different day or tick 'Replace'."
+            exit 1
+          fi
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::warning::The Reel scheduled for $DAY was replaced by this one."
+            echo "> ⚠️ The Reel scheduled for $DAY was replaced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Add package to the queue
+        uses: actions/upload-artifact@v5
+        with:
+          name: reel-${{ steps.prepare.outputs.publish_date }}
+          path: |
+            work/pending.json
+            work/video.mp4
+            work/cover*.jpg
+          retention-days: ${{ steps.prepare.outputs.retention_days }}
+          if-no-files-found: error
+
+      - name: Remove the replaced package
+        if: inputs.replace
+        env:
+          DAY: ${{ steps.prepare.outputs.publish_date }}
+        run: |
+          for ID in $(gh api "repos/$GH_REPO/actions/artifacts?name=reel-$DAY" \
+                        --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | .[:-1][] | .id'); do
+            gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$ID" && echo "🗑️ Removed the replaced package $ID"
+          done
+
+      - name: Queue overview
+        run: |
+          TODAY=$(TZ="$TIMEZONE" date +%F)
+          {
+            echo "### 📅 Scheduled Reels (${PUBLISH_TIME:-17:00} $TIMEZONE)"
+            gh api "repos/$GH_REPO/actions/artifacts?per_page=100" --paginate \
+              --jq '.artifacts[] | select(.expired == false and (.name | startswith("reel-"))) | .name' \
+              | sort -u | sed 's/^reel-//' | awk -v t="$TODAY" '$0 >= t { print "- " $0 }'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the temporary upload branch
+        if: always() && inputs.video_upload != ''
+        continue-on-error: true
+        env:
+          REF: ${{ inputs.video_upload }}
+        run: gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$REF"

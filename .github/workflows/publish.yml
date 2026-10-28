@@ -1,0 +1,141 @@
+# 2) Automatic publishing at PUBLISH_TIME in TIMEZONE + the author's comment a minute later.
+#
+#    GitHub Actions cron runs in UTC and is often late, so it starts early (35 and
+#    15 minutes ahead) at every UTC offset the timezone uses (summer and winter time).
+#    The script decides which run is the right one: it uploads the video, waits for
+#    FINISHED and publishes at exactly PUBLISH_TIME. Other runs exit within seconds.
+#
+#    The schedule block below is rewritten by the control panel whenever you change
+#    the publish time or timezone. Default: 17:00 UTC.
+name: 2 · Publish scheduled Reel
+
+on:
+  schedule:
+    # >>> publish-schedule (managed by Reels Studio: 17:00 UTC)
+    - cron: "25 16 * * *"
+    - cron: "45 16 * * *"
+    # <<< publish-schedule
+  workflow_dispatch:
+    inputs:
+      now:
+        description: "Publish today's package right away (test, ignores the publish time)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # commit history/published.json (the never-publish-twice ledger)
+  actions: read    # download the artifact from the "Schedule" workflow
+
+concurrency:
+  group: reel-publish
+  cancel-in-progress: false
+
+env:
+  GRAPH_API_ACCESS_TOKEN: ${{ secrets.GRAPH_API_ACCESS_TOKEN }}
+  GRAPH_API_ACCOUNT_ID: ${{ secrets.GRAPH_API_ACCOUNT_ID }}
+  GRAPH_API_HOST: ${{ vars.GRAPH_API_HOST }}
+  GRAPH_API_VERSION: ${{ vars.GRAPH_API_VERSION }}
+  TIMEZONE: ${{ vars.TIMEZONE || 'UTC' }}
+  PUBLISH_TIME: ${{ vars.PUBLISH_TIME }}
+  MEDIA_HOST: ${{ vars.MEDIA_HOST }}
+  COMMENT_DELAY_SECONDS: ${{ vars.COMMENT_DELAY_SECONDS }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      media_id: ${{ steps.publish.outputs.media_id }}
+      has_comment: ${{ steps.publish.outputs.has_comment }}
+      comment_b64: ${{ steps.publish.outputs.comment_b64 }}
+      comment_at: ${{ steps.publish.outputs.comment_at }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # ONLY the package dated today (in TIMEZONE) is taken → max. 1 Reel per day.
+      # "Today" = the day of the upcoming publish slot (this run starts up to 40 min
+      # early, which matters when the publish time is just after midnight).
+      - name: Download today's package
+        id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AHEAD: ${{ inputs.now && '0' || '40' }}
+        run: |
+          NAME="reel-$(TZ="$TIMEZONE" date -d "+$AHEAD minutes" +%F)"
+          RUN_ID=$(gh api "repos/$GH_REPO/actions/artifacts?name=$NAME" \
+                   --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .workflow_run.id // empty')
+          if [ -z "$RUN_ID" ] || ! gh run download "$RUN_ID" -n "$NAME" -D work; then
+            echo "ℹ️ Nothing scheduled for today ($NAME). Exiting."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "📦 Found package $NAME (run $RUN_ID)."
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v6
+        if: steps.fetch.outputs.found == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        if: steps.fetch.outputs.found == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Publish
+        id: publish
+        if: steps.fetch.outputs.found == 'true'
+        run: python main.py publish ${{ inputs.now && '--now' || '' }}
+
+      # Marker for the control panel's history: published-YYYY-MM-DD-<videoId>
+      - name: Record in history
+        if: steps.publish.outputs.published == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: published-${{ steps.publish.outputs.publish_date }}-${{ steps.publish.outputs.video_id }}
+          path: work/published.json
+          retention-days: 90
+
+      # Permanent record: a Short listed in history/published.json is never scheduled or published again.
+      # continue-on-error: the comment job must still run; the Instagram caption check stays as a backup.
+      - name: Save to the published ledger
+        if: steps.publish.outputs.ledger_changed == 'true'
+        continue-on-error: true
+        env:
+          VIDEO_ID: ${{ steps.publish.outputs.video_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history/published.json
+          git commit -m "Published $VIDEO_ID"
+          for i in 1 2 3; do
+            git pull --rebase --quiet && git push --quiet && exit 0
+            sleep 5
+          done
+          echo "::error::Could not save history/published.json"
+          exit 1
+
+  comment:
+    needs: publish
+    # Runs only when the Reel was just published AND the Short had an author comment.
+    if: needs.publish.outputs.published == 'true' && needs.publish.outputs.has_comment == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Post the author's comment
+        run: >
+          python auto_commenter.py
+          --media-id "${{ needs.publish.outputs.media_id }}"
+          --text-b64 "${{ needs.publish.outputs.comment_b64 }}"
+          --at "${{ needs.publish.outputs.comment_at }}"

@@ -1,0 +1,61 @@
+# 3) Checks all credentials right in the cloud (started from the control panel).
+#    Publishes nothing. Problems show up as annotations, which the panel reads.
+name: 3 · Test connections
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      GRAPH_API_ACCESS_TOKEN: ${{ secrets.GRAPH_API_ACCESS_TOKEN }}
+      GRAPH_API_ACCOUNT_ID: ${{ secrets.GRAPH_API_ACCOUNT_ID }}
+      YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+      TIMEZONE: ${{ vars.TIMEZONE || 'UTC' }}
+      PUBLISH_TIME: ${{ vars.PUBLISH_TIME }}
+      GRAPH_API_HOST: ${{ vars.GRAPH_API_HOST }}
+      GRAPH_API_VERSION: ${{ vars.GRAPH_API_VERSION }}
+      MEDIA_HOST: ${{ vars.MEDIA_HOST }}
+      AI_LABEL: ${{ vars.AI_LABEL }}
+      YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+      YTDLP_PROXY: ${{ secrets.YTDLP_PROXY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Cookies for yt-dlp (optional)
+        if: env.YTDLP_COOKIES != ''
+        run: |
+          printf '%s\n' "$YTDLP_COOKIES" > "$RUNNER_TEMP/cookies.txt"
+          echo "YTDLP_COOKIES_FILE=$RUNNER_TEMP/cookies.txt" >> "$GITHUB_ENV"
+
+      # One step per area: the panel shows each step's ✅/❌ (step names must start with "Check: ").
+      - name: "Check: YouTube API & channel"
+        if: always()
+        run: python verify_setup.py --only youtube
+
+      - name: "Check: Video download from YouTube (optional)"
+        if: always()
+        run: python verify_setup.py --only download
+
+      - name: "Check: Instagram account & permissions"
+        if: always()
+        run: python verify_setup.py --only instagram

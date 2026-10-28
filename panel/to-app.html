@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening Reels Studio</title>
+<style>
+  :root { --bg: #07090b; --text: #e8eef0; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #ffffff; --text: #0b1014; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); font: 16px system-ui, sans-serif; }
+</style>
+</head>
+<body>
+Opening Reels Studio…
+<script>
+  // One-time hand-over: the old panel (opened as a file) stored its settings in this browser.
+  // The desktop app runs on http://127.0.0.1:48765, a different origin, so pass them along once.
+  let raw = null, remember = true;
+  try {
+    raw = localStorage.getItem("pod-reels-panel");
+    if (!raw) { raw = sessionStorage.getItem("pod-reels-panel"); remember = false; }
+  } catch (e) { /* storage unavailable */ }
+  const b64 = (t) => btoa(Array.from(new TextEncoder().encode(t), (c) => String.fromCharCode(c)).join(""));
+  const payload = raw ? "#import=" + encodeURIComponent(b64(JSON.stringify({ cfg: JSON.parse(raw), remember }))) : "";
+  location.replace("http://127.0.0.1:48765/" + payload);
+</script>
+</body>
+</html>

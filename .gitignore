@@ -1,0 +1,27 @@
+# Secrets
+.env
+cookies*.txt
+
+# Working data (downloaded videos, packages)
+work/
+*.mp4
+*.part
+*.ytdl
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Generated bundle for the control panel
+panel/project-bundle.js
+tools/download_shorts.json
+tools/studio.log
+tools/.panel-migrated

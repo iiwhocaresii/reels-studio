@@ -1,0 +1,12 @@
+google-api-python-client>=2.150
+# [default] adds yt-dlp-ejs; YouTube additionally needs the Deno JS runtime
+yt-dlp[default]
+requests>=2.32
+# Uses the system certificate store (antivirus HTTPS scanning / company proxies on your PC)
+truststore>=0.10
+python-dotenv>=1.0
+pytz>=2024.2
+# Static ffmpeg build (used when ffmpeg is not installed on the system)
+imageio-ffmpeg>=0.6
+# Only for MEDIA_HOST=s3 (Cloudflare R2 / AWS S3), otherwise not needed:
+# boto3>=1.35

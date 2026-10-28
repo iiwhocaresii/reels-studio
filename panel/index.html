@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reels Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307090b'/%3E%3Cpath d='M6.5 5H21c3.9 0 6.5 2.6 6.5 6s-2.6 6-6.5 6h-5.6l1-4H21c1.3 0 2.2-.8 2.2-2s-.9-2-2.2-2H9.3z' fill='%23fff'/%3E%3Cpath d='M11.8 11h4.4L12.4 27H8z' fill='%232fe3a0'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 32 32"><path d="M6.5 5H21c3.9 0 6.5 2.6 6.5 6s-2.6 6-6.5 6h-5.6l1-4H21c1.3 0 2.2-.8 2.2-2s-.9-2-2.2-2H9.3z" fill="currentColor"/><path class="mark-accent" d="M11.8 11h4.4L12.4 27H8z"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Reels Studio</div>
+        <div class="brand-sub" id="brand-sub">Shorts → Reels</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav" hidden>
+      <button data-view="planner" class="active">Planner</button>
+      <button data-view="queue">Queue <span class="count" id="queue-count" hidden>0</span></button>
+      <button data-view="history">History</button>
+      <button data-view="settings">Settings</button>
+    </nav>
+    <div class="topbar-right">
+      <div class="sync" id="sync" hidden><i class="dot" id="sync-dot"></i><span id="sync-text">Loading…</span></div>
+      <button class="btn ghost icon" id="btn-refresh" title="Refresh" hidden>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
+      </button>
+      <button class="btn ghost icon" id="btn-theme" title="Light / dark mode">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== FIRST RUN ===================== -->
+    <section id="view-welcome" class="welcome" hidden>
+      <span class="pill">Free tool · YouTube Shorts → Instagram Reels</span>
+      <h1>Post your Shorts<br><em>as Reels on autopilot</em></h1>
+      <p>Pick a Short, pick a day, done. Your Reel goes live at the time you choose, with your pinned comment – all running in the cloud for free on GitHub Actions. No code, no terminal. First, connect this panel to GitHub once.</p>
+      <div class="card card-pad glow">
+        <ol class="steps">
+          <li>
+            <b>Create an empty private repository on GitHub</b>
+            <p class="hint">Just enter a name (e.g. <span class="mono">shorts-to-reels</span>), choose <b>Private</b> and click <b>Create repository</b>. Leave everything else as it is.</p>
+            <a class="btn sm" href="https://github.com/new?name=shorts-to-reels&visibility=private" target="_blank" rel="noopener">Open github.com/new ↗</a>
+          </li>
+          <li>
+            <b>Create an access token (fine-grained token)</b>
+            <p class="hint">Repository access: <b>Only select repositories</b> → pick your new repository. Set the longest expiration available. Under <b>Repository permissions</b> set:</p>
+            <ul class="perm-list">
+              <li><b>Actions</b>, <b>Contents</b>, <b>Secrets</b>, <b>Variables</b>, <b>Workflows</b>: Read and write</li>
+            </ul>
+            <a class="btn sm" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create token ↗</a>
+          </li>
+          <li>
+            <b>Paste the token and repository</b>
+            <div class="stack" style="margin-top:12px">
+              <label class="field">GitHub token
+                <input type="password" id="w-token" placeholder="github_pat_…" autocomplete="off">
+              </label>
+              <label class="field">Repository (owner/name)
+                <input type="text" id="w-repo" placeholder="your-account/shorts-to-reels" autocomplete="off">
+              </label>
+              <label class="field">YouTube API key <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0">(optional now – lets the panel show your Shorts; see the README for how to get one)</span>
+                <input type="password" id="w-yt" placeholder="AIza…" autocomplete="off">
+              </label>
+              <label class="check"><input type="checkbox" id="w-remember" checked> Remember on this computer</label>
+              <div><button class="btn primary lg" id="w-connect">Connect panel</button></div>
+            </div>
+          </li>
+        </ol>
+        <p class="hint" style="margin-top:16px">Next, a short checklist walks you through the rest: <b>upload the project</b> → <b>add your API keys</b> → <b>pick your channel &amp; publish time</b> → <b>run a test</b>.</p>
+      </div>
+    </section>
+
+    <!-- ===================== PLANNER ===================== -->
+    <section id="view-planner" hidden>
+      <div id="setup-banner"></div>
+      <div class="view-head">
+        <div>
+          <span class="eyebrow">Planner</span>
+          <h2>Plan your <em>Reels</em></h2>
+          <p>Pick a Short and a day in the calendar. The Reel goes live on that day at exactly <b data-pubtime>17:00</b>.</p>
+        </div>
+      </div>
+      <div class="planner">
+        <section class="card window">
+          <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="cal-head">
+            <h2 id="cal-title">—</h2>
+            <button class="btn sm" id="cal-today">Today</button>
+            <button class="btn icon sm" id="cal-prev" title="Previous month">‹</button>
+            <button class="btn icon sm" id="cal-next" title="Next month">›</button>
+          </div>
+          <div class="cal-weekdays" id="cal-weekdays"></div>
+          <div class="cal-grid" id="cal-grid"></div>
+          <div class="legend">
+            <span class="chip scheduled">Scheduled</span>
+            <span class="chip preparing">Preparing</span>
+            <span class="chip published">Published</span>
+            <span class="chip failed">Failed</span>
+          </div>
+        </section>
+
+        <aside class="card">
+          <div class="card-head">
+            <div>
+              <h3>Your Shorts</h3>
+              <div class="shorts-channel" id="shorts-channel"></div>
+            </div>
+            <div class="card-actions">
+              <button class="btn sm" id="btn-dl-shorts" hidden title="Download your newest Shorts to Downloads\Shorts on this computer">⬇️ Download my Shorts</button>
+              <button class="btn sm ghost" id="shorts-reload">Reload</button>
+            </div>
+          </div>
+          <div class="dl-status" id="dl-status" hidden></div>
+          <div class="shorts-tools">
+            <div class="input-row">
+              <input type="text" id="manual-video" placeholder="…or paste a link to any Short">
+              <button class="btn sm" id="manual-video-btn">Select</button>
+            </div>
+          </div>
+          <div class="shorts-list" id="shorts-list"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ===================== QUEUE ===================== -->
+    <section id="view-queue" hidden>
+      <div class="view-head">
+        <div>
+          <span class="eyebrow">Queue</span>
+          <h2>Coming <em>up next</em></h2>
+          <p>Each Reel goes live on its own day at <b data-pubtime>17:00</b>; your author comment follows shortly after.</p>
+        </div>
+      </div>
+      <div class="list" id="queue-list"></div>
+    </section>
+
+    <!-- ===================== HISTORY ===================== -->
+    <section id="view-history" hidden>
+      <div class="view-head">
+        <div>
+          <span class="eyebrow">History</span>
+          <h2>Already <em>live</em></h2>
+          <p>Published Reels and the latest automation runs.</p>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="list" id="history-list"></div>
+        <div class="card">
+          <div class="card-head"><h3>Latest runs</h3></div>
+          <div style="overflow-x:auto"><table class="runs" id="runs-table"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SETTINGS ===================== -->
+    <section id="view-settings" hidden>
+      <div class="view-head">
+        <div>
+          <span class="eyebrow">Settings</span>
+          <h2>Setup &amp; <em>keys</em></h2>
+          <p>Connection, API keys, channel, publish time and options.</p>
+        </div>
+      </div>
+      <div class="settings-grid">
+        <div class="card card-pad wide glow" id="checklist"></div>
+
+        <div class="card card-pad stack" id="card-project">
+          <h3><span class="num">1</span>Project on GitHub</h3>
+          <div id="project-status" class="hint">—</div>
+          <div><button class="btn primary" id="btn-upload">Upload / update project</button></div>
+          <p class="hint">Uploads the scripts and automations into your repository. Click it during setup and whenever you get a new version of the panel.</p>
+        </div>
+
+        <div class="card card-pad stack" id="card-connection">
+          <h3>Panel connection</h3>
+          <label class="field">GitHub token
+            <input type="password" id="s-token" autocomplete="off">
+          </label>
+          <label class="field">Repository
+            <input type="text" id="s-repo" autocomplete="off">
+          </label>
+          <label class="field">YouTube API key (for previews in the panel)
+            <input type="password" id="s-yt" autocomplete="off">
+          </label>
+          <label class="check"><input type="checkbox" id="s-remember"> Remember on this computer</label>
+          <div class="input-row">
+            <button class="btn" id="btn-save-conn">Save connection</button>
+            <button class="btn ghost danger" id="btn-logout">Disconnect</button>
+          </div>
+        </div>
+
+        <div class="card card-pad wide" id="card-secrets">
+          <h3 style="margin-bottom:14px"><span class="num">2</span>API keys <span class="muted small" style="font-weight:500;text-transform:none;letter-spacing:0">(stored encrypted in GitHub Secrets – they can't be read back)</span></h3>
+          <div id="secrets-list"></div>
+        </div>
+
+        <div class="card card-pad stack" id="card-schedule">
+          <h3><span class="num">3</span>Channel &amp; schedule</h3>
+          <p class="hint">Which YouTube channel to take Shorts from, and what time Reels go live.</p>
+          <div class="field">
+            <label for="ch-input">YouTube channel</label>
+            <div class="input-row">
+              <input type="text" id="ch-input" placeholder="@yourchannel or a channel link" autocomplete="off">
+              <button class="btn" id="btn-ch-find">Find</button>
+            </div>
+          </div>
+          <div id="ch-preview"></div>
+          <div class="two-col">
+            <label class="field">Publish time
+              <input type="time" id="sch-time" step="60">
+            </label>
+            <label class="field">Time zone
+              <select id="sch-tz"></select>
+            </label>
+          </div>
+          <p class="hint" id="sch-hint"></p>
+          <div><button class="btn primary" id="btn-save-schedule">Save channel &amp; schedule</button></div>
+        </div>
+
+        <div class="card card-pad stack" id="card-verify">
+          <h3><span class="num">4</span>Access test</h3>
+          <p class="hint">Checks your YouTube key, the video download, the Instagram token and its permissions in the cloud. Publishes nothing.</p>
+          <div><button class="btn primary" id="btn-verify">▶ Run access test</button></div>
+          <div id="verify-result"></div>
+        </div>
+
+        <div class="card card-pad stack">
+          <h3>Options</h3>
+          <label class="field">Cover image in the profile grid
+            <select id="var-COVER_MODE">
+              <option value="grid">YouTube thumbnail, fitted to the profile grid (recommended)</option>
+              <option value="youtube">YouTube thumbnail as is (grid crops the edges)</option>
+              <option value="none">Frame from the video (Instagram picks)</option>
+            </select>
+          </label>
+          <label class="field">Instagram “AI info” label (default for new Reels)
+            <select id="var-AI_LABEL">
+              <option value="off">Off</option>
+              <option value="on">On: my videos use AI (e.g. an AI clone or voice)</option>
+            </select>
+            <span class="hint">Meta requires the label on realistic AI-generated video. It can only be set when publishing; you can change it for each Reel when scheduling.</span>
+          </label>
+          <label class="field">How the video is handed to Instagram
+            <select id="var-MEDIA_HOST">
+              <option value="resumable">Direct upload to Meta (recommended)</option>
+              <option value="litterbox">Temporary public hosting (Litterbox)</option>
+              <option value="s3">Cloudflare R2 / S3</option>
+            </select>
+          </label>
+          <label class="field">Comment under the Reel
+            <select id="var-COMMENT_MODE">
+              <option value="youtube">Copy my comment from under the Short</option>
+              <option value="template">Use the template below (e.g. link to the full video)</option>
+              <option value="off">No comment</option>
+            </select>
+          </label>
+          <label class="field">Comment template
+            <textarea id="var-COMMENT_TEMPLATE" rows="3"></textarea>
+            <span class="hint">Placeholders: <code>{full_video_url}</code> (first YouTube link in the Short's description, else your channel), <code>{short_url}</code>, <code>{channel_url}</code>, <code>{title}</code>. Links aren't clickable on Instagram, so add “Link in bio”.</span>
+          </label>
+          <label class="field">Comment delay after publishing (seconds)
+            <input type="number" id="var-COMMENT_DELAY_SECONDS" min="10" max="3600" step="10">
+          </label>
+          <div><button class="btn" id="btn-save-vars">Save options</button></div>
+        </div>
+
+        <div class="card card-pad stack danger-zone">
+          <h3>Manual override</h3>
+          <p class="hint">Publishes the Reel scheduled for <b>today</b> right now instead of at <b data-pubtime>17:00</b>. Use it only for testing or when something went wrong.</p>
+          <div><button class="btn danger" id="btn-publish-now">Publish today's Reel now</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="credit">
+    <span>Reels Studio</span><span class="sep">•</span><span>made by <a href="https://www.youtube.com/@PROOFOFDATA" target="_blank" rel="noopener">PROOF OF DATA ↗</a></span>
+  </footer>
+
+  <div class="action-bar" id="action-bar"></div>
+  <div class="toasts" id="toasts"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
+  <script src="crypto.js"></script>
+  <script src="project-bundle.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
