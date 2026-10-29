@@ -1125,7 +1125,9 @@ function renderScheduleHint() {
   let crons = [];
   try { crons = cronLines(time, zone); } catch { /* invalid zone */ }
   const min = hhmmToMin(time);
-  $("#sch-hint").innerHTML = `Reels go live at <b>${esc(fmtClock(min))}</b> ${esc(zone.replace(/_/g, " "))} time on the day you pick. Same-day scheduling closes at ${esc(fmtClock(min - PREP_LEAD))}. <span class="muted">(${crons.length} cloud checks a day)</span>`;
+  const readme = S.cfg.repo ? `https://github.com/${S.cfg.repo}#7--optional-on-time-publishing-with-cron-joborg` : "";
+  $("#sch-hint").innerHTML = `Reels go live at <b>${esc(fmtClock(min))}</b> ${esc(zone.replace(/_/g, " "))} time on the day you pick. Same-day scheduling closes at ${esc(fmtClock(min - PREP_LEAD))}. <span class="muted">(${crons.length} cloud checks a day)</span>`
+    + `<br>GitHub sometimes runs its schedule late or skips it. For on-time Reels, add a free <b>cron-job.org</b> trigger at <b>${esc(fmtClock(min - CRON_LEADS[0]))}</b> and <b>${esc(fmtClock(min - CRON_LEADS[1]))}</b>${readme ? ` (<a href="${esc(readme)}" target="_blank" rel="noopener">how ↗</a>)` : ""}.`;
 }
 
 async function findChannel() {
@@ -1186,6 +1188,7 @@ async function saveSchedule() {
     await setVariables({ YOUTUBE_CHANNEL_ID: ch.id, TIMEZONE: zone, PUBLISH_TIME: time });
     const cron = await updatePublishSchedule(time, zone);
     const channelChanged = ch.id !== S.cfg.channel;
+    const timeChanged = !!S.cfg.time && (time !== S.cfg.time || zone !== S.cfg.tz);
     Object.assign(S.cfg, { channel: ch.id, tz: zone, time });
     if (ch.title) S.cfg.channelInfo = ch;
     S.pendingChannel = null;
@@ -1196,7 +1199,9 @@ async function saveSchedule() {
       missing: " The cloud schedule will be set when you upload the project.",
       nomarkers: " ⚠️ Couldn't update the schedule in publish.yml – click <b>Upload / update project</b> to fix it.",
     }[cron];
-    toast(`Saved: <b>${esc(ch.title || ch.id)}</b>, Reels at <b>${esc(fmtClock(hhmmToMin(time)))}</b> ${esc(zone)}.${note}`, cron === "nomarkers" ? "info" : "ok", 9000);
+    const m = hhmmToMin(time);
+    const cronJob = timeChanged ? ` Using cron-job.org? Change its times to <b>${esc(fmtClock(m - CRON_LEADS[0]))}</b> and <b>${esc(fmtClock(m - CRON_LEADS[1]))}</b>.` : "";
+    toast(`Saved: <b>${esc(ch.title || ch.id)}</b>, Reels at <b>${esc(fmtClock(m))}</b> ${esc(zone)}.${note}${cronJob}`, cron === "nomarkers" || timeChanged ? "info" : "ok", timeChanged ? 15000 : 9000);
     if (channelChanged) { S.shorts = []; loadShorts().then(renderData); }
     renderBrand();
     await loadSettingsData();

@@ -54,7 +54,8 @@ It listens only on 127.0.0.1 and accepts actions only from its own page.
 and `work`) and double-click **`Install Reels Studio.bat`**. It installs Python if needed,
 the packages and a **Reels Studio** desktop shortcut. Everything else (keys, schedule, queue)
 lives in your GitHub repository; on a new computer the panel only asks for your GitHub token
-once.
+once. Create a **second** token for it (same settings) instead of regenerating the first one,
+so the other computer keeps working.
 
 ### 2 · Create a private GitHub repository and a token
 
@@ -179,6 +180,8 @@ If you change the publish time in the panel, change the cron-job.org schedule to
    > **Don't have the files at hand?** Run Reels Studio as a desktop app (below). It
    > downloads your Shorts from *your own* computer (only GitHub's servers are blocked)
    > and attaches the right file automatically. Or use YouTube Studio → Content → ⋮ → Download.
+   The filter above your Shorts shows **To do** (not used yet) by default; switch to
+   **Scheduled**, **Published** or **All** to see the rest.
 2. **Queue:** see what's coming up. You can **Cancel** a Reel or **Retry** one that failed.
 3. **History:** what was published and when, with links.
 
@@ -280,6 +283,10 @@ python main.py publish --now                       # publishes RIGHT NOW (carefu
 
 ## Troubleshooting
 
+- **`CERTIFICATE_VERIFY_FAILED` on your PC** (install or Download my Shorts). Your antivirus
+  (e.g. Avast) or a company proxy scans HTTPS. The installer and the app use the Windows
+  certificate store, so this is handled; if you installed by hand, run
+  `.venv\Scripts\pip install --use-feature=truststore -r requirements.txt`.
 - **yt-dlp: "Sign in to confirm you're not a bot".** YouTube blocks downloads from GitHub's
   servers. The reliable fix is to **attach the video file** when scheduling. Alternatives: a paid
   residential proxy in the `YTDLP_PROXY` secret, or YouTube cookies, which work only sometimes.
