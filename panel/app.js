@@ -5,6 +5,7 @@ const DEFAULT_TIME = "17:00";
 const PREP_LEAD = 35;            // the publish cron starts 35 min before publish time → same-day scheduling closes then
 const MAX_DAYS_AHEAD = 88;       // GitHub keeps artifacts for 90 days at most
 const STORE_KEY = "pod-reels-panel";
+const FILTER_KEY = "pod-reels-short-filter";
 const THEME_KEY = "pod-reels-theme";
 const PUBLISH_WORKFLOW_PATH = ".github/workflows/publish.yml";
 const SECRETS = [
@@ -156,6 +157,7 @@ const S = {
   repo: null,
   shorts: [],
   shortsError: null,
+  shortFilter: (() => { try { return localStorage.getItem(FILTER_KEY) || "todo"; } catch { return "todo"; } })(),
   videos: {},          // videoId → {id,title,thumb,publishedAt,duration}
   artifacts: [],
   prepRuns: [],
@@ -581,6 +583,19 @@ function renderCalendar() {
   $("#cal-grid").innerHTML = cells.join("");
 }
 
+const SHORT_FILTERS = [["todo", "To do"], ["scheduled", "Scheduled"], ["published", "Published"], ["all", "All"]];
+/** "published" | "scheduled" | "todo" (never used, or a failed/missed day). */
+function shortStatus(videoId) {
+  if ((S.history || []).some((h) => h.video_id === videoId)) return "published";
+  const days = videoDays(videoId);
+  if (days.some((d) => d.kind === "published")) return "published";
+  if (days.some((d) => ["scheduled", "preparing"].includes(d.kind) && d.iso >= todayIso())) return "scheduled";
+  return "todo";
+}
+function renderShortFilter(counts) {
+  $("#short-filter").innerHTML = counts ? SHORT_FILTERS.map(([key, label]) =>
+    `<button class="${key === S.shortFilter ? "active" : ""}" data-short-filter="${key}">${label}<span class="count">${counts[key]}</span></button>`).join("") : "";
+}
 function emptyShorts(icon, html) {
   return `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">${icon}</div>${html}</div>`;
 }
@@ -590,6 +605,7 @@ function renderShorts() {
   $("#shorts-channel").innerHTML = info && info.id === S.cfg.channel
     ? `${info.thumb ? `<img src="${esc(info.thumb)}" alt="">` : ""}<span>${esc(info.title)}</span>`
     : "";
+  renderShortFilter(null);
   if (S.shortsError === "nokey") {
     el.innerHTML = emptyShorts("🔑", `Add your YouTube API key in <a href="#" data-goto="settings" data-scroll="card-connection">Settings</a> to see your Shorts here.<br><span class="small">You can also paste a Short link above.</span>`);
     return;
@@ -610,8 +626,21 @@ function renderShorts() {
     el.innerHTML = `<div class="empty" style="grid-column:1/-1"><span class="spin"></span> Loading Shorts…</div>`;
     return;
   }
-  const list = [...S.shorts];
+  const status = new Map(S.shorts.map((v) => [v.id, shortStatus(v.id)]));
+  const counts = { todo: 0, scheduled: 0, published: 0, all: S.shorts.length };
+  for (const s of status.values()) counts[s]++;
+  renderShortFilter(counts);
+  // The selected Short always stays visible, whatever the filter.
+  const list = S.shorts.filter((v) => S.shortFilter === "all" || status.get(v.id) === S.shortFilter || v.id === S.selVideo);
   if (S.selVideo && !list.some((v) => v.id === S.selVideo)) list.unshift(S.videos[S.selVideo] || { id: S.selVideo, title: `Short ${S.selVideo}`, duration: 0, thumb: videoThumb(S.selVideo) });
+  if (!list.length) {
+    el.innerHTML = emptyShorts(S.shortFilter === "todo" ? "🎉" : "🫙", {
+      todo: "Every Short is scheduled or published.<br><span class=\"small\">New Shorts show up here after you post them on YouTube.</span>",
+      scheduled: "Nothing scheduled right now.<br><span class=\"small\">Pick a Short under <b>To do</b> and a day in the calendar.</span>",
+      published: "Nothing published to Instagram yet.",
+    }[S.shortFilter]);
+    return;
+  }
   el.innerHTML = list.map((v) => {
     const badges = videoDays(v.id).filter((d) => d.kind !== "failed").map((d) => `<span class="chip">${d.kind === "published" ? "✓ " : ""}${esc(fmtDay(d.iso))}</span>`).join("")
       + (S.local?.[v.id] ? `<span class="chip" title="The video file is on this computer (Downloads\Shorts)">💾</span>` : "");
@@ -1434,6 +1463,12 @@ document.addEventListener("click", (ev) => {
     S.videoFile = null;
     renderShorts(); renderActionBar();
     autoAttach(S.selVideo);
+    return;
+  }
+  if (t.dataset.shortFilter) {
+    S.shortFilter = t.dataset.shortFilter;
+    try { localStorage.setItem(FILTER_KEY, S.shortFilter); } catch { /* works without storage too */ }
+    renderShorts();
     return;
   }
   if (t.dataset.cancel) { cancelDay(t.dataset.cancel); return; }
