@@ -136,6 +136,11 @@ def cmd_prepare(args) -> int:
 def cover_url_for(pending: dict) -> str | None:
     """The grid-fitted cover needs a public URL for an hour (Graph API only takes cover_url)."""
     path = config.WORK_DIR / (pending.get("cover_file") or "")
+    if pending.get("cover_file") and pending.get("cover_url"):
+        try:  # rebuild with the current layout, so packages queued before a cover fix get it too
+            make_grid_cover(pending["cover_url"], path)
+        except Exception as exc:  # noqa: BLE001 – the cover from the package is still there
+            print(f"⚠️  Could not rebuild the grid cover ({exc}), using the one from the package.")
     if pending.get("cover_file") and path.is_file():
         import media_host
 

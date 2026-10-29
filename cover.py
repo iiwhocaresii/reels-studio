@@ -1,9 +1,10 @@
 """Cover image that survives Instagram's profile grid crop.
 
-The profile grid shows only the centre of a Reel cover: about 840x1120 px of a 1080x1920
-cover (measured on a real post). YouTube stores a Short's custom thumbnail as a 16:9 image
-with the vertical design in the middle, so we cut that design out, fit it entirely into the
-grid-visible box and fill the rest of the 9:16 cover with a blurred copy.
+The profile grid shows only the centre of a Reel cover: about 1012x1350 px of a 1080x1920
+cover (measured on real posts, Oct 2026). YouTube stores a Short's custom thumbnail as a 16:9
+image with the vertical design in the middle, so we cut that design out, scale it to the full
+height of the grid-visible box (blurred fill shows only left and right of it in the grid) and
+fill the rest of the 9:16 cover with a blurred copy.
 """
 
 import subprocess
@@ -14,7 +15,8 @@ import requests
 from youtube_client import ffmpeg_path
 
 COVER_W, COVER_H = 1080, 1920
-GRID_BOX_H, GRID_BOX_TOP = 1120, 400  # grid-visible area: 840x1120 starting 400 px from the top
+GRID_BOX_H = 1350  # grid-visible area: about 1012x1350, vertically centred
+GRID_BOX_TOP = (COVER_H - GRID_BOX_H) // 2
 
 
 def make_grid_cover(thumbnail_url: str, output: Path) -> Path:
