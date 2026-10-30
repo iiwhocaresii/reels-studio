@@ -29,15 +29,15 @@ def parse_date(value: str, today: date | None = None) -> date:
     raise SystemExit(f"❌ Invalid date '{value}', use YYYY-MM-DD (e.g. 2026-10-28).")
 
 
-def compute_publish_time(publish_date: str | None = None, now: datetime | None = None) -> datetime:
-    """Returns the local datetime of PUBLISH_TIME tomorrow, or on the given day.
+def compute_publish_time(publish_date: str | None = None, now: datetime | None = None, clock: str | None = None) -> datetime:
+    """Returns the local datetime of PUBLISH_TIME (or `clock`, HH:MM) tomorrow, or on the given day.
 
     pytz.localize picks the correct UTC offset for that date (e.g. CET vs. CEST).
     """
     tz = pytz.timezone(config.TIMEZONE)
     now_local = (now or datetime.now(pytz.utc)).astimezone(tz)
     day = parse_date(publish_date, now_local.date()) if publish_date else now_local.date() + timedelta(days=1)
-    hour, minute = (int(x) for x in config.PUBLISH_TIME.split(":"))
+    hour, minute = (int(x) for x in (clock or config.PUBLISH_TIME).split(":"))
     return tz.localize(datetime(day.year, day.month, day.day, hour, minute, 0))
 
 

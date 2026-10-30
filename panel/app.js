@@ -19,7 +19,8 @@ const VARIABLES = {
   COVER_MODE: "grid", AI_LABEL: "off", MEDIA_HOST: "resumable", COMMENT_DELAY_SECONDS: "60",
   COMMENT_MODE: "youtube", COMMENT_TEMPLATE: "▶️ Full video on YouTube: {full_video_url}\n🔗 Link in bio",
 };
-const WORKFLOWS = { prepare: "prepare.yml", publish: "publish.yml", verify: "verify.yml" };
+const WORKFLOWS = { prepare: "prepare.yml", publish: "publish.yml", verify: "verify.yml", today: "post-today.yml" };
+const MAX_TODAY_WAIT = 300; // minutes; a run may wait at most this long on GitHub for the chosen time
 const BROWSER_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; } })();
 // UI text is English: keep an English browser locale (en-US / en-GB…), otherwise use en-GB.
 const UI_LOCALE = /^en\b/i.test(navigator.language || "") ? navigator.language : "en-GB";
@@ -88,6 +89,10 @@ function normalizeDate(s, createdAt) {
 function parseRunTitle(run) {
   const m = /📅\s*(.+?)\s*·\s*(.+)$/u.exec(run?.display_title || "");
   return m ? { date: normalizeDate(m[1], run.created_at), videoId: extractVideoId(m[2]) } : null;
+}
+function parseTodayTitle(run) {
+  const m = /⚡\s*(\d{4}-\d{2}-\d{2})\s+(\S+)\s*·\s*(.+)$/u.exec(run?.display_title || "");
+  return m ? { date: m[1], at: m[2], videoId: extractVideoId(m[3]) } : null;
 }
 /** open = can be scheduled; closed = today, too late; past; far = beyond artifact retention. */
 function dateStatus(iso) {
@@ -173,6 +178,8 @@ const S = {
   selDate: null,
   replace: false,
   pendingChannel: null,
+  todayRuns: [],
+  todayAt: "",
   busy: false,
   lastSync: null,
   syncError: null,
@@ -347,10 +354,15 @@ function duplicateReason(videoId, iso) {
   if (done) return `Already published on Instagram${done.published_on ? ` on ${fmtDayLong(done.published_on)}` : ""}. Each Short is published only once.`;
   const pub = videoDays(videoId).find((d) => d.kind === "published");
   if (pub) return `Already published on Instagram on ${fmtDayLong(pub.iso)}. Each Short is published only once.`;
+  const going = todayPost(videoId);
+  if (going) return `Already going out today ${going.at === "now" ? "right away" : `at ${going.at}`}.`;
   const queued = videoDays(videoId).find((d) => ["scheduled", "preparing"].includes(d.kind) && d.iso >= todayIso());
   if (queued) return queued.iso === iso ? "This Short is already scheduled for this day." : `Already scheduled for ${fmtDayLong(queued.iso)}. Cancel it in the Queue first if you want to move it.`;
   return null;
 }
+
+/** The Post today run still active for this Short, or undefined. */
+const todayPost = (videoId) => (S.todayRuns || []).filter((r) => r.status !== "completed").map(parseTodayTitle).find((p) => p?.videoId === videoId);
 
 function buildDays() {
   const days = new Map();
@@ -377,6 +389,10 @@ function buildDays() {
   for (const h of S.history || []) {
     if (!h.published_on || !h.video_id) continue;
     const d = get(h.published_on);
+    if (h.mode === "today") { // Post today sits next to the calendar: it doesn't take the day
+      (d.posted ||= []).push({ videoId: h.video_id, runUrl: h.permalink || `https://github.com/${S.cfg.repo}/blob/HEAD/history/published.json` });
+      continue;
+    }
     if (!d.published) d.published = { videoId: h.video_id, runUrl: h.permalink || `https://github.com/${S.cfg.repo}/blob/HEAD/history/published.json`, createdAt: "" };
   }
   const recent = Date.now() - 5 * 86400000;
@@ -430,23 +446,26 @@ async function refresh({ quiet = false } = {}) {
   S.busy = true;
   setSync("busy", "Syncing…");
   try {
-    const [repo, artifacts, prepRuns, pubRuns, verifyRuns, history] = await Promise.all([
+    const [repo, artifacts, prepRuns, pubRuns, verifyRuns, todayRuns, history] = await Promise.all([
       S.repo ? Promise.resolve(S.repo) : gh(R()),
       listArtifacts(),
       listRuns(WORKFLOWS.prepare, 40),
       listRuns(WORKFLOWS.publish, 30),
       listRuns(WORKFLOWS.verify, 5),
+      listRuns(WORKFLOWS.today, 20),
       loadHistory(),
     ]);
     // Keep "just scheduled" placeholders until the real run shows up (max. 5 minutes).
     S.optimistic = (S.optimistic || []).filter((o) => Date.now() + o.id < 300000
-      && !prepRuns.some((r) => r.display_title === o.display_title && Date.parse(r.created_at) >= -o.id - 120000));
-    prepRuns.unshift(...S.optimistic);
-    Object.assign(S, { repo, artifacts, prepRuns, pubRuns, verifyRuns, history, syncError: null, lastSync: new Date() });
+      && ![...prepRuns, ...todayRuns].some((r) => r.display_title === o.display_title && Date.parse(r.created_at) >= -o.id - 120000));
+    prepRuns.unshift(...S.optimistic.filter((o) => !o.today));
+    todayRuns.unshift(...S.optimistic.filter((o) => o.today));
+    Object.assign(S, { repo, artifacts, prepRuns, pubRuns, verifyRuns, todayRuns, history, syncError: null, lastSync: new Date() });
     await updateVerifyOk();
     buildDays();
     const ids = [];
-    S.days.forEach((d) => [d.queue, d.published, d.preparing, d.failed].forEach((x) => x?.videoId && ids.push(x.videoId)));
+    S.days.forEach((d) => [d.queue, d.published, d.preparing, d.failed, ...(d.posted || [])].forEach((x) => x?.videoId && ids.push(x.videoId)));
+    todayRuns.forEach((r) => { const p = parseTodayTitle(r); if (p?.videoId) ids.push(p.videoId); });
     await loadVideos(ids).catch(() => {});
     setSync("ok", `Updated ${fmtTime(S.lastSync)}`);
   } catch (e) {
@@ -536,7 +555,7 @@ function renderData() {
   $("#queue-count").hidden = !upcoming.length;
   $("#queue-count").textContent = upcoming.length;
   document.querySelectorAll("[data-pubtime]").forEach((el) => { el.textContent = pubLabel(); });
-  if (S.view === "planner") { renderSetupBanner(); renderCalendar(); renderShorts(); }
+  if (S.view === "planner") { renderSetupBanner(); renderTodayPosts(); renderCalendar(); renderShorts(); }
   if (S.view === "queue") renderQueue();
   if (S.view === "history") renderHistory();
   if (S.view === "settings") renderChecklist();
@@ -590,7 +609,7 @@ function shortStatus(videoId) {
   const days = videoDays(videoId);
   if (days.some((d) => d.kind === "published")) return "published";
   if (days.some((d) => ["scheduled", "preparing"].includes(d.kind) && d.iso >= todayIso())) return "scheduled";
-  return "todo";
+  return todayPost(videoId) ? "scheduled" : "todo";
 }
 function renderShortFilter(counts) {
   $("#short-filter").innerHTML = counts ? SHORT_FILTERS.map(([key, label]) =>
@@ -784,6 +803,7 @@ async function attachFromFolder() {
 }
 
 function renderActionBar() {
+  if (document.activeElement?.id === "ab-today-at") return; // a background sync must not interrupt typing the time
   const bar = $("#action-bar");
   const show = S.view === "planner" && (S.selVideo || S.selDate);
   bar.classList.toggle("show", !!show);
@@ -796,7 +816,7 @@ function renderActionBar() {
 
   let sub;
   if (!S.selVideo) sub = "Now pick a <b>Short</b> from the list.";
-  else if (!S.selDate) sub = "Now pick a <b>day</b> in the calendar.";
+  else if (!S.selDate) sub = "Now pick a <b>day</b> in the calendar, or post it today below.";
   else sub = `Goes live <b>${esc(fmtDayLong(S.selDate))} at ${esc(pubLabel())}</b>`;
 
   let warn = "";
@@ -811,19 +831,101 @@ function renderActionBar() {
       <div class="ab-title">${S.selVideo ? esc(videoTitle(S.selVideo)) : "No Short selected"}</div>
       <div class="ab-sub">${sub}</div>
       ${warn ? `<div class="ab-warn">${warn}</div>` : ""}
-      ${S.selVideo && S.selDate && !dup ? `<div class="ab-opts">
+      ${S.selVideo && !dup ? `<div class="ab-opts">
         ${S.app
           ? (S.local?.[S.selVideo] ? `<button class="btn sm" id="ab-show">📂 Show in folder</button>` : `<button class="btn sm primary" id="ab-dl">⬇️ Download my Shorts</button>`)
           : (FS_OK && !S.videoFile ? `<button class="btn sm primary" id="ab-folder">📂 From Shorts folder</button>` : "")}
         <label class="btn sm ab-file ${S.videoFile ? "primary" : ""}">📎 ${S.videoFile ? `${esc(S.videoFile.name)} · ${(S.videoFile.size / 1048576).toFixed(1)} MB` : "Other file…"}<input type="file" id="ab-file" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" hidden></label>
         <label class="check"><input type="checkbox" id="ab-ai" ${aiLabelOn() ? "checked" : ""}> Instagram “AI info” label</label>
       </div>
-      ${S.videoFile ? "" : `<div class="ab-hint">${S.app && !S.local?.[S.selVideo] ? "This Short isn't on your computer yet: click Download my Shorts." : "Attach the video file: YouTube blocks downloads from GitHub's servers, so without a file scheduling may fail."}</div>`}` : ""}
+      ${S.videoFile ? "" : `<div class="ab-hint">${S.app && !S.local?.[S.selVideo] ? "This Short isn't on your computer yet: click Download my Shorts." : "Attach the video file: YouTube blocks downloads from GitHub's servers, so without a file scheduling may fail."}</div>`}
+      <div class="ab-today">
+        <b>⚡ Post today</b>
+        <input type="time" id="ab-today-at" value="${esc(S.todayAt)}" aria-label="Time today, empty means right away">
+        <button class="btn sm primary" id="ab-post-today"></button>
+        <span class="ab-hint" id="ab-today-hint"></span>
+      </div>` : ""}
       ${occupied && st?.kind === "scheduled" && status === "open" ? `<label class="check ab-warn"><input type="checkbox" id="ab-replace" ${S.replace ? "checked" : ""}> Replace “${esc(videoTitle(st.videoId))}”, which is already scheduled for this day</label>` : ""}
     </div>
     ${S.selVideo && !(S.history || []).some((h) => h.video_id === S.selVideo) ? `<button class="btn ghost sm" id="ab-mark" title="Posted this Short to Instagram yourself? Mark it so it's never scheduled.">Already on Instagram?</button>` : ""}
     <button class="btn ghost sm" id="ab-clear">Clear</button>
     <button class="btn primary lg" id="ab-schedule" ${canSchedule ? "" : "disabled"}>${occupied ? "Replace & schedule" : `Schedule for ${esc(fmtClock(pubMinutes()))}`}</button>`;
+  updateTodayControls();
+}
+/** Minutes until the chosen time today; 0 = right away (no time picked). */
+function todayWait() {
+  if (!S.todayAt) return 0;
+  const [h, m] = S.todayAt.split(":").map(Number);
+  return h * 60 + m - minutesNow();
+}
+/** Updates only the button and hint, so typing the time keeps the focus. */
+function updateTodayControls() {
+  const btn = $("#ab-post-today");
+  if (!btn) return;
+  const wait = todayWait();
+  const bad = S.todayAt && (wait <= 0 || wait > MAX_TODAY_WAIT);
+  btn.textContent = S.todayAt ? `Post at ${S.todayAt}` : "Post now";
+  btn.disabled = !!bad;
+  $("#ab-today-hint").textContent = bad
+    ? (wait <= 0 ? "That time has already passed today." : `Pick a time within ${MAX_TODAY_WAIT / 60} hours, or use the calendar.`)
+    : S.todayAt
+      ? `Doesn't take the day in the calendar. Waits on GitHub for ${wait} min, which counts as ${wait} Actions minutes.`
+      : "Goes live in about 3–6 minutes. Doesn't take the day in the calendar. Leave the time empty to post right away.";
+}
+
+/** Post today: one run for one Short, next to the calendar. The run waits for the chosen time itself. */
+async function postToday() {
+  const date = todayIso(), video = S.selVideo, at = S.todayAt, ai = aiLabelOn() ? "on" : "off", file = S.videoFile;
+  if (!at && !confirm(`Post “${videoTitle(video)}” to Instagram RIGHT NOW?`)) return;
+  const btn = $("#ab-post-today");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span> ${file ? "Uploading video…" : "Sending…"}`;
+  try {
+    const upload = file ? await uploadVideoBranch(file, date, video) : "";
+    await gh(`${R()}/actions/workflows/${WORKFLOWS.today}/dispatches`, {
+      method: "POST",
+      body: { ref: S.repo?.default_branch || "main", inputs: { post_date: date, post_at: at, video_id: video, ai_label: ai, video_upload: upload } },
+    });
+    toast(at ? `Goes live <b>today at ${esc(at)}</b>.` : "On its way. It goes live in about 3–6 minutes.", "ok", 7000);
+    S.selDate = null; S.selVideo = null; S.replace = false; S.aiLabel = null; S.videoFile = null; S.todayAt = "";
+    const pending = { id: -Date.now(), today: true, status: "queued", display_title: `⚡ ${date} ${at || "now"} · ${video}`, created_at: new Date().toISOString(), html_url: `https://github.com/${S.cfg.repo}/actions` };
+    S.optimistic = [...(S.optimistic || []), pending];
+    S.todayRuns = [pending, ...(S.todayRuns || [])];
+    renderData();
+    setTimeout(() => refresh({ quiet: true }), 4000);
+  } catch (e) {
+    toast(e.status === 404 ? "This feature isn't on GitHub yet. Upload the project in Settings first." : ghErrorText(e), "err", 9000);
+    renderActionBar();
+  }
+}
+function renderTodayPosts() {
+  const runs = (S.todayRuns || []).map((r) => ({ r, p: parseTodayTitle(r) }))
+    .filter(({ r, p }) => p?.date === todayIso() && r.conclusion !== "cancelled")
+    .sort((a, b) => (a.p.at === "now" ? "00:00" : a.p.at).localeCompare(b.p.at === "now" ? "00:00" : b.p.at));
+  $("#today-posts").innerHTML = runs.length ? `<div class="list today-posts"><span class="eyebrow">Posting today</span>${runs.map(({ r, p }) => {
+    const when = p.at === "now" ? "right away" : `at ${p.at}`;
+    const posted = r.status === "completed" && (S.history || []).some((h) => h.video_id === p.videoId);
+    const chip = r.status !== "completed" ? `<span class="chip preparing"><i class="spin"></i>Goes live ${esc(when)}</span>`
+      : posted ? `<span class="chip published">✓ Posted</span>`
+      : r.conclusion === "failure" ? `<span class="chip failed">Failed</span>`
+      : `<span class="chip">Not posted</span>`;
+    return `<div class="row">
+      <img class="row-thumb" src="${esc(videoThumb(p.videoId))}" alt="">
+      <div class="row-main">
+        <div class="row-title">${esc(videoTitle(p.videoId))}</div>
+        <div class="row-meta">${chip}<a href="${esc(r.html_url)}" target="_blank" rel="noopener">Details ↗</a></div>
+      </div>
+      ${r.status !== "completed" && r.id > 0 ? `<div class="row-actions"><button class="btn sm danger" data-cancel-today="${r.id}">Cancel</button></div>` : ""}
+    </div>`;
+  }).join("")}</div>` : "";
+}
+async function cancelToday(id) {
+  if (!confirm("Cancel this Reel? If it's already uploading to Instagram, it may be too late.")) return;
+  try {
+    await gh(`${R()}/actions/runs/${id}/cancel`, { method: "POST" });
+    toast("Cancelled.", "ok");
+    setTimeout(() => refresh({ quiet: true }), 3000);
+  } catch (e) { toast(ghErrorText(e), "err", 8000); }
 }
 
 /** Adds a Short posted by hand to history/published.json, so it is never scheduled or published. */
@@ -965,19 +1067,20 @@ async function cancelDay(iso) {
 
 /* ------------------------------------------------------------------ render: history */
 function renderHistory() {
-  const published = [...S.days.entries()].filter(([, d]) => d.published).sort((a, b) => b[0].localeCompare(a[0]));
+  const published = [...S.days.entries()].flatMap(([iso, d]) => [d.published, ...(d.posted || [])].filter(Boolean).map((p) => ({ iso, p })))
+    .sort((a, b) => b.iso.localeCompare(a.iso));
   $("#history-list").innerHTML = published.length
-    ? published.map(([iso, d]) => `
+    ? published.map(({ iso, p }) => `
         <div class="row">
           ${dateBadge(iso)}
-          <img class="row-thumb" src="${esc(videoThumb(d.published.videoId))}" alt="">
+          <img class="row-thumb" src="${esc(videoThumb(p.videoId))}" alt="">
           <div class="row-main">
-            <div class="row-title">${esc(videoTitle(d.published.videoId))}</div>
+            <div class="row-title">${esc(videoTitle(p.videoId))}</div>
             <div class="row-meta">
               <span class="chip published">✓ Published</span>
               <span>${esc(fmtDayLong(iso))}</span>
-              <a href="https://www.youtube.com/shorts/${esc(d.published.videoId)}" target="_blank" rel="noopener">YouTube ↗</a>
-              <a href="${esc(d.published.runUrl)}" target="_blank" rel="noopener">Reel link & details ↗</a>
+              <a href="https://www.youtube.com/shorts/${esc(p.videoId)}" target="_blank" rel="noopener">YouTube ↗</a>
+              <a href="${esc(p.runUrl)}" target="_blank" rel="noopener">Reel link & details ↗</a>
             </div>
           </div>
         </div>`).join("")
@@ -986,6 +1089,7 @@ function renderHistory() {
   const publishedRunIds = new Set(S.artifacts.filter((a) => a.name.startsWith("published-")).map((a) => a.workflow_run?.id));
   const rows = [
     ...S.prepRuns.filter((r) => r.id > 0).map((r) => ({ r, what: "Prep", title: describePrep(r) })),
+    ...(S.todayRuns || []).filter((r) => r.id > 0).map((r) => ({ r, what: "Post today", title: videoTitle(parseTodayTitle(r)?.videoId) })),
     ...S.pubRuns.filter((r) => publishedRunIds.has(r.id) || r.conclusion === "failure" || r.status !== "completed").map((r) => ({ r, what: "Publish", title: publishedRunIds.has(r.id) ? "Reel published" : "Queue check / publish" })),
     ...S.verifyRuns.map((r) => ({ r, what: "Access test", title: "Setup check" })),
   ].sort((a, b) => b.r.created_at.localeCompare(a.r.created_at)).slice(0, 25);
@@ -1477,13 +1581,15 @@ document.addEventListener("click", (ev) => {
     return;
   }
   if (t.dataset.cancel) { cancelDay(t.dataset.cancel); return; }
+  if (t.dataset.cancelToday) { cancelToday(t.dataset.cancelToday); return; }
   if (t.dataset.retry) { S.selDate = t.dataset.retry; S.selVideo = t.dataset.video; S.replace = true; S.videoFile = null; showView("planner"); autoAttach(S.selVideo); return; }
   if (t.dataset.saveSecret) { saveSecret(t.dataset.saveSecret); return; }
   if (t.dataset.delSecret) { deleteSecret(t.dataset.delSecret); return; }
   if ("fillYt" in t.dataset) { $("#sec-YOUTUBE_API_KEY").value = S.cfg.ytKey; return; }
 
   switch (t.id) {
-    case "ab-clear": S.selDate = S.selVideo = null; S.replace = false; S.videoFile = null; renderData(); break;
+    case "ab-clear": S.selDate = S.selVideo = null; S.replace = false; S.videoFile = null; S.todayAt = ""; renderData(); break;
+    case "ab-post-today": postToday(); break;
     case "ab-schedule": schedule(); break;
     case "ab-mark": markPublished(S.selVideo); break;
     case "ab-folder": attachFromFolder(); break;
@@ -1530,6 +1636,9 @@ document.addEventListener("click", (ev) => {
     case "btn-save-schedule": saveSchedule(); break;
     case "btn-publish-now": publishNow(); break;
   }
+});
+document.addEventListener("input", (ev) => {
+  if (ev.target.id === "ab-today-at") { S.todayAt = ev.target.value; updateTodayControls(); }
 });
 document.addEventListener("change", (ev) => {
   if (ev.target.id === "ab-replace") { S.replace = ev.target.checked; renderActionBar(); }

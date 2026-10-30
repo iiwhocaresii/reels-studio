@@ -1,6 +1,8 @@
 """CLI: prepare a YouTube Short and publish it as an Instagram Reel on a chosen day.
 
     python main.py prepare --publish-date YYYY-MM-DD [--video-id ID] [--ai-label on|off] [--skip-download]
+    python main.py prepare --publish-date YYYY-MM-DD --at now|HH:MM --video-id ID [...]   (post today)
+    python main.py wait
     python main.py publish [--now]
     python main.py status
 """
@@ -8,6 +10,7 @@
 import argparse
 import base64
 import json
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -16,7 +19,7 @@ from pathlib import Path
 import pytz
 
 import config
-from publisher import GraphClient, build_caption, build_comment, compute_publish_time, fmt_unix, publish_reel, to_unix
+from publisher import GraphClient, build_caption, build_comment, compute_publish_time, fmt_unix, publish_reel, sleep_until, to_unix
 from cover import make_grid_cover
 from youtube_client import YouTubeClient, download_short, find_full_video_url, use_uploaded_video
 
@@ -43,10 +46,21 @@ def add_to_history(entry: dict) -> None:
     config.HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def post_today_time(publish_date: str, at: str) -> datetime:
+    """Post today: the run must still be on the day it was started for; "now" = as soon as the package is ready."""
+    if at != "now" and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at):
+        raise SystemExit(f"❌ {at!r} is not a time, use HH:MM.")
+    now = datetime.now(pytz.timezone(config.TIMEZONE))
+    planned = compute_publish_time(publish_date, clock=None if at == "now" else at)
+    if planned.date() != now.date():
+        raise SystemExit(f"❌ This run was meant for {planned:%Y-%m-%d}, today is {now:%Y-%m-%d}. Nothing was published.")
+    return now if at == "now" else planned
+
+
 def cmd_prepare(args) -> int:
-    publish_at = compute_publish_time(args.publish_date)
+    publish_at = post_today_time(args.publish_date, args.at) if args.at else compute_publish_time(args.publish_date)
     publish_unix = to_unix(publish_at)
-    if publish_unix < time.time() + 30 * 60:  # the publish cron starts 35 / 15 minutes ahead
+    if not args.at and publish_unix < time.time() + 30 * 60:  # the publish cron starts 35 / 15 minutes ahead
         raise SystemExit(f"❌ {publish_at:%Y-%m-%d %H:%M} has passed or is too close, pick a later day.")
 
     yt = YouTubeClient(config.require("YOUTUBE_API_KEY"))
@@ -111,6 +125,7 @@ def cmd_prepare(args) -> int:
         "scheduled_publish_time": publish_unix,
         "video": video,
         "prepared_at": int(time.time()),
+        **({"mode": "today"} if args.at else {}),  # the ledger keeps these apart from the one-per-day calendar
     }
     config.WORK_DIR.mkdir(exist_ok=True)
     config.PENDING_FILE.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -153,6 +168,13 @@ def cover_url_for(pending: dict) -> str | None:
     return pending.get("cover_url")
 
 
+def cmd_wait(_args) -> int:
+    """Post today: keeps the run alive until the upload has to start."""
+    pending = json.loads(config.PENDING_FILE.read_text(encoding="utf-8"))
+    sleep_until(pending["scheduled_publish_time"] - config.UPLOAD_LEAD_SECONDS, "uploading the video")
+    return 0
+
+
 def cmd_publish(args) -> int:
     config.gh_output("published", "false")
     config.gh_output("has_comment", "false")
@@ -161,13 +183,14 @@ def cmd_publish(args) -> int:
         return 0
 
     pending = json.loads(config.PENDING_FILE.read_text(encoding="utf-8"))
+    mode = {"mode": pending["mode"]} if pending.get("mode") else {}
     now = time.time()
     target = now if args.now else pending["scheduled_publish_time"]
     print(f"🎬 {pending['title']} → planned for {fmt_unix(target)}")
 
     planned_day = pending["publish_at_local"][:10]
     # The day of the upcoming publish slot (the run may start just before midnight).
-    ahead = timedelta(minutes=0 if args.now else config.PREP_LEAD_MINUTES)
+    ahead = timedelta(minutes=0 if args.now or mode else config.PREP_LEAD_MINUTES)
     today = (datetime.now(pytz.timezone(config.TIMEZONE)) + ahead).strftime("%Y-%m-%d")
     if planned_day != today:
         print(f"ℹ️  This package is planned for {planned_day}, today is {today}, not publishing.")
@@ -191,7 +214,7 @@ def cmd_publish(args) -> int:
         print(f"ℹ️  A post with the same caption is already on Instagram ({existing.get('permalink')}). Not publishing again.")
         add_to_history({
             "video_id": pending["video_id"], "title": pending["title"], "published_on": existing["timestamp"][:10],
-            "media_id": existing["id"], "permalink": existing.get("permalink", ""), "note": "found on Instagram",
+            "media_id": existing["id"], "permalink": existing.get("permalink", ""), "note": "found on Instagram", **mode,
         })
         config.gh_output("video_id", pending["video_id"])
         config.gh_output("ledger_changed", "true")
@@ -207,7 +230,7 @@ def cmd_publish(args) -> int:
 
     add_to_history({
         "video_id": pending["video_id"], "title": pending["title"], "published_on": planned_day,
-        "published_at": int(published_at), "media_id": media_id, "permalink": permalink,
+        "published_at": int(published_at), "media_id": media_id, "permalink": permalink, **mode,
     })
     config.WORK_DIR.joinpath("published.json").write_text(
         json.dumps(
@@ -255,10 +278,13 @@ def main() -> int:
     p.add_argument(
         "--publish-date", required=True, help="Day to publish at PUBLISH_TIME: 2026-10-30, 'today' or 'tomorrow'"
     )
+    p.add_argument("--at", help="Post today: 'now' or HH:MM instead of PUBLISH_TIME (must be run on that day)")
     p.add_argument("--skip-download", action="store_true", help="Don't download the video (metadata test)")
     p.add_argument("--ai-label", choices=("on", "off"), help="Instagram 'AI info' label for this Reel (default: AI_LABEL)")
     p.add_argument("--video-file", help="Use this video file (attached in the panel) instead of downloading from YouTube")
     p.set_defaults(func=cmd_prepare)
+
+    sub.add_parser("wait", help="Post today: wait until the upload has to start").set_defaults(func=cmd_wait)
 
     p = sub.add_parser("publish", help="Publish the prepared package at the planned time")
     p.add_argument("--now", action="store_true", help="Publish right away (test)")

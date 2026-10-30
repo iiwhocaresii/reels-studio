@@ -1,0 +1,176 @@
+# 4) Manual run: posts one Reel today, right away or at a chosen time, next to the calendar queue.
+#    No daily limit: every click in the panel is one run for one Short. The run itself waits
+#    for the chosen time, so no cron is needed, but the waiting counts as GitHub Actions minutes.
+name: 4 · Post a Reel today
+# The control panel parses the date, time and video ID from the run name, keep this format.
+run-name: "⚡ ${{ inputs.post_date }} ${{ inputs.post_at || 'now' }} · ${{ inputs.video_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      post_date:
+        description: "Today, YYYY-MM-DD (a run from another day publishes nothing)"
+        required: true
+      post_at:
+        description: "Time today, HH:MM (empty = as soon as the video is ready)"
+        required: false
+        default: ""
+      video_id:
+        description: "YouTube Short ID or URL"
+        required: true
+      ai_label:
+        description: "Instagram 'AI info' label for this Reel: on / off (empty = AI_LABEL setting)"
+        required: false
+        default: ""
+      video_upload:
+        description: "Branch with the video file attached in the panel (empty = download from YouTube)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write  # commit history/published.json, delete the temporary branch
+  actions: read    # is this Short waiting in the calendar queue?
+
+# Per Short: different Shorts run side by side, the same Short never does.
+concurrency:
+  group: post-today-${{ inputs.video_id }}
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+      GRAPH_API_ACCESS_TOKEN: ${{ secrets.GRAPH_API_ACCESS_TOKEN }}
+      GRAPH_API_ACCOUNT_ID: ${{ secrets.GRAPH_API_ACCOUNT_ID }}
+      GRAPH_API_HOST: ${{ vars.GRAPH_API_HOST }}
+      GRAPH_API_VERSION: ${{ vars.GRAPH_API_VERSION }}
+      TIMEZONE: ${{ vars.TIMEZONE || 'UTC' }}
+      PUBLISH_TIME: ${{ vars.PUBLISH_TIME }}
+      MEDIA_HOST: ${{ vars.MEDIA_HOST }}
+      COMMENT_DELAY_SECONDS: ${{ vars.COMMENT_DELAY_SECONDS }}
+      COVER_MODE: ${{ vars.COVER_MODE }}
+      COMMENT_MODE: ${{ vars.COMMENT_MODE }}
+      COMMENT_TEMPLATE: ${{ vars.COMMENT_TEMPLATE }}
+      AI_LABEL: ${{ vars.AI_LABEL }}
+      YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+      YTDLP_PROXY: ${{ secrets.YTDLP_PROXY }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # yt-dlp needs a JavaScript runtime for YouTube (stream signature solving)
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Cookies for yt-dlp (optional)
+        if: env.YTDLP_COOKIES != ''
+        run: |
+          printf '%s\n' "$YTDLP_COOKIES" > "$RUNNER_TEMP/cookies.txt"
+          echo "YTDLP_COOKIES_FILE=$RUNNER_TEMP/cookies.txt" >> "$GITHUB_ENV"
+
+      # The panel puts an attached video on a temporary branch "upload/…" (one file, no history).
+      - name: Fetch the attached video
+        id: upload
+        if: inputs.video_upload != ''
+        env:
+          REF: ${{ inputs.video_upload }}
+        run: |
+          set -euo pipefail
+          # The branch name contains "/", so pass it URL-encoded as ?ref= (never inside the URL path).
+          REF_Q=$(jq -rn --arg r "$REF" '$r|@uri')
+          NAME=$(gh api "repos/$GH_REPO/contents?ref=$REF_Q" --jq '[.[] | select(.type == "file")][0].name')
+          [ -n "$NAME" ] || { echo "::error::The attached video wasn't found on branch $REF."; exit 1; }
+          FILE="$RUNNER_TEMP/$NAME"
+          # Binary download with curl: `gh api` treats the body as text and fails ("transform: short source buffer").
+          curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw+json" -o "$FILE" "https://api.github.com/repos/$GH_REPO/contents/$NAME?ref=$REF_Q"
+          [ -s "$FILE" ] || { echo "::error::Downloading the attached video failed."; exit 1; }
+          echo "📎 Attached video: $NAME ($(du -h "$FILE" | cut -f1))"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare package
+        id: prepare
+        env:
+          POST_DATE: ${{ inputs.post_date }}
+          POST_AT: ${{ inputs.post_at }}
+          VIDEO_ID: ${{ inputs.video_id }}
+          VIDEO_FILE_IN: ${{ steps.upload.outputs.file }}
+          AI_LABEL_INPUT: ${{ inputs.ai_label }}
+        run: |
+          ARGS=(--publish-date "$POST_DATE" --at "${POST_AT:-now}" --video-id "$VIDEO_ID")
+          case "$AI_LABEL_INPUT" in on|off) ARGS+=(--ai-label "$AI_LABEL_INPUT");; esac
+          if [ -n "$VIDEO_FILE_IN" ]; then ARGS+=(--video-file "$VIDEO_FILE_IN"); fi
+          python main.py prepare "${ARGS[@]}"
+
+      - name: Remove the temporary upload branch
+        if: always() && inputs.video_upload != ''
+        continue-on-error: true
+        env:
+          REF: ${{ inputs.video_upload }}
+        run: gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$REF"
+
+      - name: Check the calendar queue
+        env:
+          VID: ${{ steps.prepare.outputs.video_id }}
+        run: |
+          # A Short waiting for its day must not go out today as well.
+          TODAY=$(TZ="$TIMEZONE" date +%F)
+          for RUN in $(gh api "repos/$GH_REPO/actions/artifacts?per_page=100" --paginate \
+                         | jq -rs --arg today "reel-$TODAY" \
+                           '[.[].artifacts[] | select(.expired == false and (.name | startswith("reel-")) and .name >= $today)] | group_by(.name) | map(max_by(.created_at).workflow_run.id) | .[]'); do
+            TITLE=$(gh api "repos/$GH_REPO/actions/runs/$RUN" --jq .display_title)
+            case "$TITLE" in *"$VID"*)
+              echo "::error::This Short is already in the queue ($TITLE). Cancel that one first."
+              exit 1;;
+            esac
+          done
+
+      - name: Wait for the chosen time
+        run: python main.py wait
+
+      # The run may have waited for hours: publish against the current ledger.
+      - name: Refresh the published ledger
+        run: git pull --rebase --quiet
+
+      - name: Publish
+        id: publish
+        run: python main.py publish
+
+      # Permanent record: a Short listed in history/published.json is never scheduled or published again.
+      # continue-on-error: the comment must still go out; the Instagram caption check stays as a backup.
+      - name: Save to the published ledger
+        if: steps.publish.outputs.ledger_changed == 'true'
+        continue-on-error: true
+        env:
+          VIDEO_ID: ${{ steps.publish.outputs.video_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history/published.json
+          git commit -m "Published $VIDEO_ID"
+          for i in 1 2 3; do
+            git pull --rebase --quiet && git push --quiet && exit 0
+            sleep 5
+          done
+          echo "::error::Could not save history/published.json"
+          exit 1
+
+      - name: Post the author's comment
+        if: steps.publish.outputs.has_comment == 'true'
+        env:
+          MEDIA_ID: ${{ steps.publish.outputs.media_id }}
+          TEXT_B64: ${{ steps.publish.outputs.comment_b64 }}
+          COMMENT_AT: ${{ steps.publish.outputs.comment_at }}
+        run: python auto_commenter.py --media-id "$MEDIA_ID" --text-b64 "$TEXT_B64" --at "$COMMENT_AT"

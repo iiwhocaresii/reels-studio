@@ -56,6 +56,8 @@ COMMENT_DELAY_SECONDS = int(env("COMMENT_DELAY_SECONDS", "60"))
 PREP_LEAD_MINUTES = int(env("PREP_LEAD_MINUTES", "40"))
 # How long after the target time we still publish (delayed cron / re-run).
 LATE_GRACE_MINUTES = int(env("LATE_GRACE_MINUTES", "180"))
+# Post today: how long before the chosen time the run stops waiting and starts the upload.
+UPLOAD_LEAD_SECONDS = int(env("UPLOAD_LEAD_SECONDS", "300"))
 
 # --- How the video reaches the Graph API ---
 # resumable = direct upload to Meta (recommended, no public URL needed)

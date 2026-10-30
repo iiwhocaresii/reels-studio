@@ -336,6 +336,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .ab-opts { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .ab-file { cursor: pointer; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 .ab-hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.ab-today { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; font-size: 13px; }
+.ab-today .ab-hint { margin-top: 0; flex-basis: 100%; }
+.ab-today input { width: auto; padding: 4px 8px; }
+.today-posts { margin-bottom: 16px; }
 
 /* ---------- lists ---------- */
 .list { display: grid; gap: 12px; }

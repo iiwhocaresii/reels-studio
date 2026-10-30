@@ -182,12 +182,19 @@ If you change the publish time in the panel, change the cron-job.org schedule to
    > and attaches the right file automatically. Or use YouTube Studio → Content → ⋮ → Download.
    The filter above your Shorts shows **To do** (not used yet) by default; switch to
    **Scheduled**, **Published** or **All** to see the rest.
-2. **Queue:** see what's coming up. You can **Cancel** a Reel or **Retry** one that failed.
-3. **History:** what was published and when, with links.
+2. **Post today (no planning):** click a Short, attach the video and click **Post now**. It
+   goes live in about 3–6 minutes, or pick a time today and click **Post at …** (up to 5 hours
+   ahead). Post as many as you like per day; the calendar stays free, and a run shows under
+   **Posting today**, where you can cancel it. Waiting for a chosen time uses GitHub Actions
+   minutes one to one (2,000 free minutes a month on a private repository), so **Post now**
+   is the cheapest.
+3. **Queue:** see what's coming up. You can **Cancel** a Reel or **Retry** one that failed.
+4. **History:** what was published and when, with links.
 
 **Publishing only happens on the days you choose:**
-- Every Reel needs a day; nothing is ever published "at random".
-- At most **one Reel per day**. A taken day can only be overwritten by ticking **Replace**.
+- Every Reel needs a day or your own click on **Post today**; nothing is ever published "at random".
+- At most **one Reel per day in the calendar**. A taken day can only be overwritten by ticking
+  **Replace**. **Post today** adds to that, and a run left over from another day publishes nothing.
 - **A Short is never published twice.** Every published Short is recorded in
   `history/published.json` in your repository (permanently). A Short in it, or one already
   queued for another day, can't be scheduled, and right before publishing the whole
@@ -230,7 +237,7 @@ If you change the publish time in the panel, change the cron-job.org schedule to
 | File | Purpose |
 |---|---|
 | `panel/` | **Reels Studio** control panel (static HTML/CSS/JS, talks to the GitHub API) |
-| `main.py` | CLI: `prepare`, `publish`, `status` |
+| `main.py` | CLI: `prepare`, `wait`, `publish`, `status` |
 | `youtube_client.py` | Latest Short, metadata, author comment, download via yt-dlp |
 | `publisher.py` | Caption + hashtags, timing, Graph API, publishing |
 | `auto_commenter.py` | Posts the comment under the Reel |
@@ -240,6 +247,7 @@ If you change the publish time in the panel, change the cron-job.org schedule to
 | `.github/workflows/prepare.yml` | **1 · Schedule a Reel**, manual / from the panel |
 | `.github/workflows/publish.yml` | **2 · Publish scheduled Reel**, cron + comment |
 | `.github/workflows/verify.yml` | **3 · Test connections** |
+| `.github/workflows/post-today.yml` | **4 · Post a Reel today**, from the panel |
 
 ### Settings (GitHub → Settings → Secrets and variables → Actions)
 
