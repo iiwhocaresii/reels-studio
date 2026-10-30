@@ -1159,7 +1159,8 @@ function renderProjectStatus() {
   else {
     const names = (S.workflows || []).map((w) => w.path.split("/").pop());
     const present = Object.values(WORKFLOWS).filter((f) => names.includes(f)).length;
-    html += `<br>Automations: ${present === 3 ? `<span class="chip ok">✓ uploaded (3/3)</span>` : `<span class="chip warn">${present}/3 – upload the project</span>`}`;
+    const all = Object.keys(WORKFLOWS).length;
+    html += `<br>Automations: ${present === all ? `<span class="chip ok">✓ uploaded (${all}/${all})</span>` : `<span class="chip warn">${present}/${all} – upload the project</span>`}`;
   }
   if (bundle) html += `<br>Version in this panel: <span class="mono">${esc(bundle.built)}</span> (${bundle.files.length} files)`;
   $("#project-status").innerHTML = html;
@@ -1368,13 +1369,15 @@ async function uploadProject() {
     status("Checking repository…");
     S.repo = await gh(R());
     const branch = S.repo.default_branch || "main";
-    let head = await gh(`${R()}/git/ref/heads/${branch}`).catch((e) => { if ([404, 409].includes(e.status)) return null; throw e; });
+    // Cache-busted: the browser keeps this answer for a minute, and a stale head makes the final update fail ("not a fast forward").
+    const readHead = () => gh(`${R()}/git/ref/heads/${branch}?t=${Date.now()}`);
+    let head = await readHead().catch((e) => { if ([404, 409].includes(e.status)) return null; throw e; });
     if (!head) {
       // Empty repository: the first file via the Contents API creates the branch.
       status("Initialising repository…");
       const readme = bundle.files.find((f) => f.path === "README.md") || bundle.files[0];
       await gh(`${R()}/contents/${readme.path}`, { method: "PUT", body: { message: "Initial commit", content: readme.b64, branch } });
-      head = await gh(`${R()}/git/ref/heads/${branch}`);
+      head = await readHead();
     }
     const baseCommit = await gh(`${R()}/git/commits/${head.object.sha}`);
     const tree = [];
