@@ -74,8 +74,8 @@ COMMENT_TEMPLATE = env("COMMENT_TEMPLATE", "▶️ Full video on YouTube: {full_
 # It can only be set when publishing, not added afterwards.
 AI_LABEL = env("AI_LABEL", "off").lower() in ("on", "true", "yes", "1")
 
-# grid    = YouTube thumbnail fitted into the area the profile grid shows (blurred fill around),
-#           hosted for 1 h on litterbox.catbox.moe because the API needs a public image URL
+# grid    = the Short's design at full height on a landscape cover with a blurred fill on the sides,
+#           hosted for about 1 h because the API needs a public image URL
 # youtube = YouTube thumbnail as is (the profile grid crops its edges)
 # none    = Instagram picks a frame from the video
 COVER_MODE = env("COVER_MODE", "grid").lower()

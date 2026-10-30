@@ -258,7 +258,7 @@ If you change the publish time in the panel, change the cron-job.org schedule to
 | `COMMENT_DELAY_SECONDS` | `60` | delay of the comment after publishing |
 | `COMMENT_MODE` | `youtube` | `youtube` = copy your comment from the Short, `template` = `COMMENT_TEMPLATE`, `off` |
 | `COMMENT_TEMPLATE` | `▶️ Full video on YouTube: {full_video_url}`<br>`🔗 Link in bio` | `{full_video_url}` = first YouTube link in the Short's description (else your channel), also `{short_url}`, `{channel_url}`, `{title}` |
-| `COVER_MODE` | `grid` | `grid` = YouTube thumbnail fitted into the area the profile grid shows (hosted ~1 h on Litterbox, Uguu or tmpfiles.org, falls back to `youtube`), `youtube` = thumbnail as is (grid crops it), `none` = Instagram picks a frame |
+| `COVER_MODE` | `grid` | `grid` = the Short's design at full height on a landscape cover, blurred fill on the sides (hosted ~1 h on Litterbox, Uguu or tmpfiles.org, falls back to `youtube`), `youtube` = thumbnail as is (grid crops it), `none` = Instagram picks a frame |
 | `AI_LABEL` | `off` | default Instagram “AI info” label (`on`/`off`); changeable per Reel when scheduling |
 | `MEDIA_HOST` | `resumable` | `litterbox` / `s3` fallbacks |
 | `GRAPH_API_HOST` / `GRAPH_API_VERSION` | `graph.facebook.com` / `v24.0` | |
@@ -311,11 +311,10 @@ python main.py publish --now                       # publishes RIGHT NOW (carefu
   with *Publish today's package right away* ticked.
 - **GitHub Actions minutes.** Private repositories get 2,000 free minutes a month. A
   publishing day uses about 40 minutes; a day without a package uses about 4.
-- **Cover.** The profile grid shows only the centre of a Reel cover (1080×1440 of
-  1080×1920). With `COVER_MODE=grid` (default) the tool scales your whole YouTube thumbnail
-  to the full height of that area (blurred fill only left and right), so nothing gets cut off
-  and it fills the tile. The cover is rebuilt at publish time, so already queued Reels get
-  layout fixes too.
+- **Cover.** The profile grid shows the centre of a Reel cover. With `COVER_MODE=grid` (default) the
+  tool puts your Short's design at full height on a landscape cover with a blurred fill on the sides,
+  so it fills the tile without depending on Instagram's exact crop size. The cover is built at
+  publish time, so already queued Reels get layout fixes too.
 - **Permission error (code 10 / 200).** The token is missing `instagram_content_publish`
   or `instagram_manage_comments`. Run the **access test** in the panel to see what's missing.
 
