@@ -311,7 +311,7 @@ python main.py publish --now                       # publishes RIGHT NOW (carefu
   with *Publish today's package right away* ticked.
 - **GitHub Actions minutes.** Private repositories get 2,000 free minutes a month. A
   publishing day uses about 40 minutes; a day without a package uses about 4.
-- **Cover.** The profile grid shows only the centre of a Reel cover (about 1012×1350 of
+- **Cover.** The profile grid shows only the centre of a Reel cover (1080×1440 of
   1080×1920). With `COVER_MODE=grid` (default) the tool scales your whole YouTube thumbnail
   to the full height of that area (blurred fill only left and right), so nothing gets cut off
   and it fills the tile. The cover is rebuilt at publish time, so already queued Reels get
