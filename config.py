@@ -13,6 +13,8 @@ VIDEO_FILE = WORK_DIR / "video.mp4"
 COVER_FILE = WORK_DIR / "cover.jpg"
 # Permanent record of every published Short (committed to the repo by the publish workflow).
 HISTORY_FILE = BASE_DIR / "history" / "published.json"
+# The entry of the Short just published; `main.py record` writes it into the ledger.
+LEDGER_ENTRY_FILE = WORK_DIR / "ledger-entry.json"
 
 load_dotenv(BASE_DIR / ".env")
 

@@ -108,11 +108,15 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add history/published.json
-          git commit -m "Published $VIDEO_ID"
-          for i in 1 2 3; do
-            git pull --rebase --quiet && git push --quiet && exit 0
-            sleep 5
+          # Runs finishing together all edit this file: start from the newest ledger on every try.
+          for i in 1 2 3 4 5 6 7 8; do
+            git fetch --quiet origin "$GITHUB_REF_NAME"
+            git reset --hard --quiet FETCH_HEAD
+            python main.py record
+            git add history/published.json
+            git diff --cached --quiet || git commit --quiet -m "Published $VIDEO_ID"
+            git push --quiet origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            sleep $((RANDOM % 8 + 2))
           done
           echo "::error::Could not save history/published.json"
           exit 1

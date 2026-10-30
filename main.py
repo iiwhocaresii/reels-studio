@@ -4,6 +4,7 @@
     python main.py prepare --publish-date YYYY-MM-DD --at now|HH:MM --video-id ID [...]   (post today)
     python main.py wait
     python main.py publish [--now]
+    python main.py record
     python main.py status
 """
 
@@ -55,6 +56,13 @@ def post_today_time(publish_date: str, at: str) -> datetime:
     if planned.date() != now.date():
         raise SystemExit(f"❌ This run was meant for {planned:%Y-%m-%d}, today is {now:%Y-%m-%d}. Nothing was published.")
     return now if at == "now" else planned
+
+
+def record_published(entry: dict) -> None:
+    """Keeps the entry in work/: the workflow re-records it on top of the newest ledger if another run pushed first."""
+    add_to_history(entry)
+    config.WORK_DIR.mkdir(exist_ok=True)
+    config.LEDGER_ENTRY_FILE.write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
 
 
 def cmd_prepare(args) -> int:
@@ -212,7 +220,7 @@ def cmd_publish(args) -> int:
     existing = client.find_published(pending["caption"])
     if existing:
         print(f"ℹ️  A post with the same caption is already on Instagram ({existing.get('permalink')}). Not publishing again.")
-        add_to_history({
+        record_published({
             "video_id": pending["video_id"], "title": pending["title"], "published_on": existing["timestamp"][:10],
             "media_id": existing["id"], "permalink": existing.get("permalink", ""), "note": "found on Instagram", **mode,
         })
@@ -228,7 +236,7 @@ def cmd_publish(args) -> int:
     print(f"🚀 Reel published {fmt_unix(published_at)}: {permalink} (media {media_id})")
     config.gh_summary(f"### 🚀 Reel published\n{permalink} · {fmt_unix(published_at)}")
 
-    add_to_history({
+    record_published({
         "video_id": pending["video_id"], "title": pending["title"], "published_on": planned_day,
         "published_at": int(published_at), "media_id": media_id, "permalink": permalink, **mode,
     })
@@ -253,6 +261,11 @@ def cmd_publish(args) -> int:
         config.gh_output("comment_at", str(int(max(target, published_at)) + config.COMMENT_DELAY_SECONDS))
     else:
         print(f"ℹ️  {SKIP_COMMENT}")
+    return 0
+
+
+def cmd_record(_args) -> int:
+    add_to_history(json.loads(config.LEDGER_ENTRY_FILE.read_text(encoding="utf-8")))
     return 0
 
 
@@ -290,6 +303,7 @@ def main() -> int:
     p.add_argument("--now", action="store_true", help="Publish right away (test)")
     p.set_defaults(func=cmd_publish)
 
+    sub.add_parser("record", help="Add the Short just published to the ledger").set_defaults(func=cmd_record)
     sub.add_parser("status", help="Show the prepared package").set_defaults(func=cmd_status)
 
     args = parser.parse_args()
