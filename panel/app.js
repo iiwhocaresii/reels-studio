@@ -216,40 +216,71 @@ function toast(msg, kind = "info", ms = 5000) {
 class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
-// Reads and the upload's blob/tree steps can be repeated safely; anything that starts a workflow or
-// creates a branch is sent once, so a lost connection can never schedule or publish a Short twice.
-const RETRY_SAFE = (method, path) => method === "GET" || /\/git\/(blobs|trees)$/.test(path);
+async function ghOnce(path, method, body) {
+  let res;
+  try {
+    res = await fetch(`https://api.github.com${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${S.cfg.token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // "Failed to fetch": no answer at all (connection dropped, PC just woke up, antivirus web shield…)
+    throw new ApiError(0, "network");
+  }
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, data?.message || res.statusText);
+  return data;
+}
+// Reads and the upload's git objects can simply be sent again (a repeated branch create just finds the branch).
+const RETRY_SAFE = (method, path) => method === "GET" || /\/git\/(blobs|trees|commits|refs)$/.test(path);
 async function gh(path, { method = "GET", body } = {}) {
-  const retry = RETRY_SAFE(method, path);
+  if (/\/dispatches$/.test(path)) return dispatch(path, body);
+  if (!RETRY_SAFE(method, path)) return ghOnce(path, method, body).catch((e) => { throw e.status === 0 ? new ApiError(0, "network-unsure") : e; });
   for (let attempt = 0; ; attempt++) {
-    let res;
     try {
-      res = await fetch(`https://api.github.com${path}`, {
-        method,
-        headers: {
-          Authorization: `Bearer ${S.cfg.token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          ...(body ? { "Content-Type": "application/json" } : {}),
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch {
-      // "Failed to fetch": no answer at all (connection dropped, PC just woke up, antivirus web shield…)
-      if (retry && attempt < 2) { await sleep(1500 * (attempt + 1)); continue; }
-      throw new ApiError(0, retry ? "network" : "network-unsure");
+      return await ghOnce(path, method, body);
+    } catch (e) {
+      if (attempt > 0 && e.status === 422 && /\/git\/refs$/.test(path) && /already exists/i.test(e.message)) return null;
+      if ((e.status === 0 || e.status >= 500) && attempt < 2) { await sleep(1500 * (attempt + 1)); continue; }
+      throw e;
     }
-    if (retry && res.status >= 500 && attempt < 2) { await sleep(1500 * (attempt + 1)); continue; }
-    if (res.status === 204) return null;
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new ApiError(res.status, data?.message || res.statusText);
-    return data;
+  }
+}
+/**
+ * Starting a workflow (schedule, Post today, publish) is sent only once, never repeated automatically.
+ * If the answer gets lost or GitHub answers with an error of its own, the panel checks whether a new run
+ * started anyway. The quick read before sending also opens a fresh connection: browsers resend a read on
+ * a dropped connection by themselves, but never a POST, which is where most "Failed to fetch" errors came from.
+ */
+async function dispatch(path, body) {
+  const runsPath = path.replace(/\/dispatches$/, "/runs?event=workflow_dispatch&per_page=1");
+  const newest = async () => (await gh(runsPath)).workflow_runs?.[0]?.id || 0;
+  const before = await newest().catch(() => null);
+  try {
+    return await ghOnce(path, "POST", body);
+  } catch (e) {
+    if (e.status !== 0 && e.status < 500) throw e; // a clear refusal (bad input, permissions): nothing started
+    if (before !== null) {
+      for (let i = 0; i < 6; i++) { // a started run shows up within a few seconds
+        await sleep(4000);
+        if ((await newest().catch(() => 0)) > before) return null;
+      }
+    }
+    throw e.status === 0 ? new ApiError(0, "network-unsure") : e;
   }
 }
 const R = () => `/repos/${S.cfg.repo}`;
 function ghErrorText(e) {
   if (e.status === 0 && e.message === "network-unsure") return "The connection to GitHub dropped while sending. It may or may not have gone through: wait a moment, press ↻ Refresh and check the calendar before trying again.";
   if (e.status === 0) return "Can't reach GitHub right now (no internet, or an antivirus web shield blocked the connection). Press ↻ Refresh in a moment.";
+  if (e.status >= 500) return `GitHub is having trouble right now (${esc(e.message)}). Check <a href="https://www.githubstatus.com" target="_blank" rel="noopener">githubstatus.com</a>, then press ↻ Refresh and look at the calendar before trying again.`;
   if (e.status === 401) return "Your GitHub token is invalid or has expired. Create a new one and paste it in Settings.";
   if (e.status === 403) return `The token is missing a permission (${esc(e.message)}).`;
   if (e.status === 404) return "Repository or item not found. Check the repository name and the token's access.";
