@@ -924,6 +924,7 @@ function updateTodayControls() {
 /** Post today: one run for one Short, next to the calendar. The run waits for the chosen time itself. */
 async function postToday() {
   const date = todayIso(), video = S.selVideo, at = S.todayAt, ai = aiLabelOn() ? "on" : "off", file = S.videoFile;
+  if (!file && !confirm(NO_FILE_WARNING)) return;
   if (!at && !confirm(`Post “${videoTitle(video)}” to Instagram RIGHT NOW?`)) return;
   const btn = $("#ab-post-today");
   btn.disabled = true;
@@ -1022,8 +1023,12 @@ async function uploadVideoBranch(file, date, video) {
   return branch;
 }
 
+// YouTube blocks downloads from GitHub's servers almost every time, so sending without a file is nearly always a failed run.
+const NO_FILE_WARNING = "No video file is attached, so GitHub would have to download the Short from YouTube, and YouTube blocks that almost every time.\n\n"
+  + "Tip: a freshly uploaded Short takes a few minutes to show 💾 in the Planner (the app downloads it by itself); pick it again then, or attach the file (📎).\n\nSend anyway?";
 async function schedule() {
   const date = S.selDate, video = S.selVideo, replace = S.replace, ai = aiLabelOn() ? "on" : "off", file = S.videoFile;
+  if (!file && !confirm(NO_FILE_WARNING)) return;
   const btn = $("#ab-schedule");
   btn.disabled = true;
   btn.innerHTML = `<span class="spin"></span> ${file ? "Uploading video…" : "Sending…"}`;
