@@ -281,10 +281,22 @@ def publish_reel(
 ) -> str:
     """Uploads the video, waits for FINISHED, waits until publish_at and publishes. Returns media_id."""
     if config.MEDIA_HOST == "resumable":
-        print("📤 Creating REELS container (resumable upload)…")
-        container = client.create_reel_container(caption, cover_url, ai_generated=ai_generated)
-        print(f"📤 Uploading {video_path.stat().st_size / 1_048_576:.1f} MB straight to Meta…")
-        client.upload_resumable(container, video_path)
+        # Meta's upload endpoint now and then answers "ProcessingFailedError: Request processing failed" for a
+        # perfectly fine file. A container that failed to take the upload is not reused: a fresh one is created.
+        # Nothing is published here, so repeating this step can never create a second Reel.
+        for attempt in range(3):
+            print("📤 Creating REELS container (resumable upload)…")
+            container = client.create_reel_container(caption, cover_url, ai_generated=ai_generated)
+            print(f"📤 Uploading {video_path.stat().st_size / 1_048_576:.1f} MB straight to Meta…")
+            try:
+                client.upload_resumable(container, video_path)
+                break
+            except (RuntimeError, requests.RequestException) as exc:
+                if attempt == 2:
+                    raise
+                wait = 30 * (attempt + 1)
+                print(f"   ↻ upload failed ({str(exc)[:160]}), new container and retry in {wait} s")
+                time.sleep(wait)
     else:
         import media_host
 
