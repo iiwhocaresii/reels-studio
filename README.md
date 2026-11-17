@@ -9,9 +9,9 @@ Short, the same comment is posted under the Reel a minute later.
 
 Everything runs for free in **GitHub Actions**, so your computer doesn't have to be on.
 
-Made by [PROOF OF DATA](https://www.youtube.com/@PROOFOFDATA) · works with any channel.
+Made by [PROOF OF DATA](https://proofofdata.io/) ([YouTube](https://www.youtube.com/@PROOFOFDATA)) · works with any channel.
 
-**📖 Illustrated step-by-step setup guide, every screen explained:** <https://proofofdata.pages.dev/reels>
+**📖 Illustrated step-by-step setup guide, every screen explained:** <https://proofofdata.io/reels/>
 
 ---
 
